@@ -28,8 +28,7 @@ def callback():
 
     return "OK"
 
-
-    @handler.add(MessageEvent, message=TextMessage)
+@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text
 
@@ -62,4 +61,5 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run()
+
 
