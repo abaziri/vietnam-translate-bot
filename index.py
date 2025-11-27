@@ -41,10 +41,10 @@ def handle_message(event):
     # ===== 翻訳処理 =====
     if is_vietnamese(user_text):
         translated = GoogleTranslator(source="vi", target="ja").translate(user_text)
-        reply = f"[VI → JP]\n{translated}"
+        reply = translated
     else:
         translated = GoogleTranslator(source="ja", target="vi").translate(user_text)
-        reply = f"[JP → VI]\n{translated}"
+        reply = translated
 
     line_bot_api.reply_message(
         event.reply_token,
@@ -54,5 +54,6 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run()
+
 
 
