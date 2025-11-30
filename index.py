@@ -135,7 +135,7 @@ def handle_message(event):
         candidates = generate_vietnamese_candidates_full(user_text)
 
         # Google 翻訳で意味のあるものだけ抽出
-        reply_message = "候補"
+        reply_message = "候補\n"
         used = 0
 
         for cand in candidates:
@@ -187,4 +187,5 @@ def handle_message(event):
 if __name__ == "__main__":
     # 実際の本番環境ではポート指定やデバッグモードの変更が必要になる場合があります
     app.run(port=8000)
+
 
