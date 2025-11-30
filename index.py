@@ -6,14 +6,16 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
 app = Flask(__name__)
 
+# 環境変数からトークンとシークレットを取得
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 
+# LINE APIクライアントとWebhookハンドラを初期化
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # =================================================================
-# ベトナム語に使われる声調や母音
+# ベトナム語に使われる声調や母音の定義
 # =================================================================
 vietnamese_accent_chars = "ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ"
 
@@ -62,11 +64,20 @@ def is_vietnamese_no_tone(text):
 
 
 # =================================================================
-# 母音変化＋声調変化 → 候補生成（mong → mông 可能）
+# 【修正済】母音変化＋声調変化 → 候補生成
 # =================================================================
 def generate_vietnamese_candidates_full(text):
+    """
+    声調なしの入力に対して、母音変化と声調変化を適用した候補を生成する。
+    声調なしの母音変化候補を優先的にリストの先頭に配置する。
+    """
     text = text.lower()
-    candidates = []
+    
+    # 声調なし候補（例: 'mông'）を優先的に集めるためのリスト
+    no_tone_candidates = [] 
+    
+    # 全ての声調付き候補（例: 'mộng'）を集めるためのリスト
+    all_candidates = [] 
 
     for i, char in enumerate(text):
 
@@ -77,18 +88,21 @@ def generate_vietnamese_candidates_full(text):
         # ② 母音の全バリエーションを取得（例：o → o/ô/ơ）
         for base_vowel in vowel_map[char]:
 
-            # ③ 声調なしの候補
+            # ③ 声調なしの候補を生成（元のテキスト、および母音変化のみ）
             cand_no_tone = text[:i] + base_vowel + text[i+1:]
-            candidates.append(cand_no_tone)
+            no_tone_candidates.append(cand_no_tone)
 
             # ④ さらに声調を付けた候補を生成
             if base_vowel in tone_map:
                 for toned in tone_map[base_vowel]:
                     cand = text[:i] + toned + text[i+1:]
-                    candidates.append(cand)
-
+                    all_candidates.append(cand)
+                    
+    # 元のテキスト、声調なし候補、声調付き候補の順に結合し、声調なしを優先
+    combined_candidates = [text] + no_tone_candidates + all_candidates
+    
     # 重複削除して最初の10件を返す
-    return list(dict.fromkeys(candidates))[:10]
+    return list(dict.fromkeys(combined_candidates))[:10]
 
 
 # =================================================================
@@ -126,13 +140,18 @@ def handle_message(event):
 
         for cand in candidates:
             try:
+                # 翻訳はベトナム語 → 日本語
                 jp = GoogleTranslator(source="vi", target="ja").translate(cand)
-                if jp != cand:  # 翻訳結果が同じ＝無意味な単語なので除外
+                
+                # 翻訳結果が同じ＝無意味な単語なので除外（例: 'abcde' → 'abcde'）
+                if jp.strip().lower() != cand.strip().lower():
                     reply_message += f"{cand} → {jp}\n"
                     used += 1
-            except:
+            except Exception as e:
+                 # 翻訳エラーが発生した場合（通常は無視して続行）
                 continue
 
+            # 意味のある候補を3件見つけたら終了
             if used >= 3:
                 break
 
@@ -166,6 +185,5 @@ def handle_message(event):
 
 
 if __name__ == "__main__":
-    app.run()
-
-
+    # 実際の本番環境ではポート指定やデバッグモードの変更が必要になる場合があります
+    app.run(port=8000)
