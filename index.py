@@ -3,10 +3,12 @@ import os
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from itertools import product # クロス結合（組み合わせ）のために使用
 
 app = Flask(__name__)
 
 # 環境変数からトークンとシークレットを取得
+# ※ 環境に合わせてこれらの変数を設定してください
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 
@@ -45,6 +47,15 @@ tone_map = {
     "y": ["ý", "ỳ", "ỷ", "ỹ", "ỵ"]
 }
 
+# 辞書ベースの訂正（頻出フレーズの修正）
+VIET_FIX_DICT = {
+    "cam on": "cảm ơn", # ありがとう (cam on -> cảm ơn)
+    "xin chao": "xin chào", # こんにちは (xin chao -> xin chào)
+    "chuc mung": "chúc mừng", # おめでとう
+    "tam biet": "tạm biệt", # さようなら
+    "mong": "mông" # mong -> mông の修正
+}
+
 
 # =================================================================
 # 判定関数
@@ -64,45 +75,71 @@ def is_vietnamese_no_tone(text):
 
 
 # =================================================================
-# 【修正済】母音変化＋声調変化 → 候補生成
+# 【最終修正済】全ての単語に変化を適用し、組み合わせる候補生成関数
 # =================================================================
 def generate_vietnamese_candidates_full(text):
     """
-    声調なしの入力に対して、母音変化と声調変化を適用した候補を生成する。
-    声調なしの母音変化候補を優先的にリストの先頭に配置する。
+    入力テキストを単語（音節）に分割し、それぞれの単語で候補を生成し、
+    全ての組み合わせをクロス結合して最終候補リストを作成する。
     """
-    text = text.lower()
+    text = text.lower().strip()
+    words = text.split()
     
-    # 声調なし候補（例: 'mông'）を優先的に集めるためのリスト
-    no_tone_candidates = [] 
+    initial_candidates = []
     
-    # 全ての声調付き候補（例: 'mộng'）を集めるためのリスト
-    all_candidates = [] 
+    # 1. 辞書による自動修正候補 (最優先)
+    if text in VIET_FIX_DICT:
+        initial_candidates.append(VIET_FIX_DICT[text])
+        
+    if not words:
+        return initial_candidates
 
-    for i, char in enumerate(text):
-
-        # ① 母音でなければスキップ
-        if char not in vowel_map:
-            continue
-
-        # ② 母音の全バリエーションを取得（例：o → o/ô/ơ）
-        for base_vowel in vowel_map[char]:
-
-            # ③ 声調なしの候補を生成（元のテキスト、および母音変化のみ）
-            cand_no_tone = text[:i] + base_vowel + text[i+1:]
-            no_tone_candidates.append(cand_no_tone)
-
-            # ④ さらに声調を付けた候補を生成
-            if base_vowel in tone_map:
-                for toned in tone_map[base_vowel]:
-                    cand = text[:i] + toned + text[i+1:]
-                    all_candidates.append(cand)
-                    
-    # 元のテキスト、声調なし候補、声調付き候補の順に結合し、声調なしを優先
-    combined_candidates = [text] + no_tone_candidates + all_candidates
+    # 2. 各単語の候補リストを生成
+    word_candidate_lists = []
     
-    # 重複削除して最初の10件を返す
-    return list(dict.fromkeys(combined_candidates))[:10]
+    for word in words:
+        word_candidates = {word} # 候補はセットで管理し、重複を自動排除
+        
+        # 単語内の全文字をループ
+        for i, char in enumerate(word):
+
+            # 母音でなければスキップ
+            if char not in vowel_map:
+                continue
+
+            # 母音の全バリエーションを取得
+            for base_vowel in vowel_map[char]:
+
+                # 声調なしの候補
+                cand_word = word[:i] + base_vowel + word[i+1:]
+                word_candidates.add(cand_word)
+
+                # 声調を付けた候補を生成
+                if base_vowel in tone_map:
+                    for toned in tone_map[base_vowel]:
+                        cand_word_toned = word[:i] + toned + word[i+1:]
+                        word_candidates.add(cand_word_toned)
+                        
+        word_candidate_lists.append(list(word_candidates))
+
+    # 3. クロス結合 (全ての単語の候補を組み合わせる)
+    
+    # 候補が多すぎるのを避けるため、単語数が2つ以下の場合のみクロス結合を試みる
+    combined_candidates = []
+    
+    if len(word_candidate_lists) <= 2:
+        # itertools.product でリスト内の全ての組み合わせを生成
+        for combination in product(*word_candidate_lists):
+            combined_candidates.append(" ".join(combination))
+    else:
+        # 3単語以上の場合、元のテキストのみを候補とする
+        combined_candidates = [text] 
+
+    # 4. 最終候補リストの作成
+    final_candidates = initial_candidates + combined_candidates
+    
+    # 重複削除し、Google翻訳の制限に合わせて最初の10件を返す
+    return list(dict.fromkeys(final_candidates))[:10]
 
 
 # =================================================================
@@ -135,7 +172,7 @@ def handle_message(event):
         candidates = generate_vietnamese_candidates_full(user_text)
 
         # Google 翻訳で意味のあるものだけ抽出
-        reply_message = "候補\n"
+        reply_message = "候補（意味のあるもののみ）：\n\n"
         used = 0
 
         for cand in candidates:
@@ -143,12 +180,12 @@ def handle_message(event):
                 # 翻訳はベトナム語 → 日本語
                 jp = GoogleTranslator(source="vi", target="ja").translate(cand)
                 
-                # 翻訳結果が同じ＝無意味な単語なので除外（例: 'abcde' → 'abcde'）
-                if jp.strip().lower() != cand.strip().lower():
+                # 翻訳結果が元の候補と同じか、または単語が全く変化しない場合は除外
+                if jp.strip().lower() != cand.strip().lower() and jp != "":
                     reply_message += f"{cand} → {jp}\n"
                     used += 1
             except Exception as e:
-                 # 翻訳エラーが発生した場合（通常は無視して続行）
+                # 翻訳エラーが発生した場合（無視して続行）
                 continue
 
             # 意味のある候補を3件見つけたら終了
@@ -185,7 +222,5 @@ def handle_message(event):
 
 
 if __name__ == "__main__":
-    # 実際の本番環境ではポート指定やデバッグモードの変更が必要になる場合があります
     app.run(port=8000)
-
 
