@@ -10,6 +10,15 @@ if creds_json:
     # GCPライブラリはこの環境変数を参照して認証します
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_path
 
+from google.cloud import speech
+
+try:
+    gcst_client = speech.SpeechClient()
+except Exception as e:
+    print("GCST Client init failed:", e)
+    gcst_client = None
+
+
 from deep_translator import GoogleTranslator
 import os
 from flask import Flask, request, abort
@@ -235,5 +244,6 @@ def handle_message(event):
 
 if __name__ == "__main__":
     app.run(port=8000)
+
 
 
