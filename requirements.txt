@@ -1,7 +1,8 @@
-flask
+Flask
 line-bot-sdk
 deep-translator
-gunicorn
+google-cloud-speech
+
 
 
 
